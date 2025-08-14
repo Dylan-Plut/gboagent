@@ -55,7 +55,7 @@ class CortexChat:
                 {
                     "tool_spec": {
                         "type": "cortex_analyst_text_to_sql",
-                        "name": "supply_chain"
+                        "name": "revenue_analyst"
                     }
                 }
             ],
@@ -66,7 +66,7 @@ class CortexChat:
                     "title_column": "title",
                     "id_column": "relative_path",
                 },
-                "supply_chain": {
+                "revenue_analyst": {
                     "semantic_model_file": self.semantic_model
                 }
             },
