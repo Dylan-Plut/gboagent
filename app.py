@@ -19,10 +19,10 @@ load_dotenv()
 
 ACCOUNT = os.getenv("ACCOUNT")
 HOST = os.getenv("HOST")
-USER = os.getenv("DEMO_USER")
-DATABASE = os.getenv("DEMO_DATABASE")
-SCHEMA = os.getenv("DEMO_SCHEMA")
-ROLE = os.getenv("DEMO_USER_ROLE")
+USER = os.getenv("USER")
+DATABASE = os.getenv("DATABASE")
+SCHEMA = os.getenv("SCHEMA")
+ROLE = os.getenv("ROLE")
 WAREHOUSE = os.getenv("WAREHOUSE")
 SLACK_APP_TOKEN = os.getenv("SLACK_APP_TOKEN")
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
@@ -272,7 +272,9 @@ def init():
         account=ACCOUNT,
         warehouse=WAREHOUSE,
         role=ROLE,
-        host=HOST
+        host=HOST,
+        database=DATABASE,
+        schema=SCHEMA
     )
     if not conn.rest.token:
         print(">>>>>>>>>> Snowflake connection unsuccessful!")
