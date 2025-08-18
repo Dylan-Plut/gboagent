@@ -4,7 +4,10 @@ import requests
 from dotenv import load_dotenv
 import generate_jwt
 from generate_jwt import JWTGenerator
-
+import sys
+for k in ["ACCOUNT","DEMO_USER","RSA_PRIVATE_KEY_PATH"]:
+    if not os.getenv(k):
+        sys.exit(f"Missing env var: {k}")
 # Load environment variables from .env
 load_dotenv()
 
