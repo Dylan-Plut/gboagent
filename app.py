@@ -62,7 +62,7 @@ def handle_message_events(ack, body, say, client):
     prompt = body['event']['text']
     print(f"\n--- Received DM: '{prompt}' from User: {user_id} ---")
     try:
-        client.chat_postEphemeral(channel=channel_id, user=user_id, text=":snowflake: Thinking... I'm looking up the answer for you.")
+        client.chat_postEphemeral(channel=channel_id, user=user_id, text=":snowflake: Thinking... I'm looking up the answer for you.") #we will change this later to rotate through a list of messages.
         print("--- Posted ephemeral 'thinking' message ---")
         print("--- Calling Cortex Agent... ---")
         response = CORTEX_APP.chat(prompt)
