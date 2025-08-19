@@ -30,6 +30,7 @@ AGENT_ENDPOINT = os.getenv("AGENT_ENDPOINT")
 SEMANTIC_MODEL = os.getenv("SEMANTIC_MODEL")
 SEARCH_SERVICE = os.getenv("SEARCH_SERVICE")
 RSA_PRIVATE_KEY_PATH = os.getenv("RSA_PRIVATE_KEY_PATH")
+RSA_PRIVATE_KEY_PASSWORD = os.getenv("RSA_PRIVATE_KEY_PASSWORD")  # Add this line
 MODEL = os.getenv("MODEL")
 
 DEBUG = False
@@ -51,7 +52,7 @@ When, what to my wondering eyes should appear,
 But a slide-deck update, with a demo so clear!
 
 And we shouted out to developers,
-Let’s launch this build live and avoid any crash!
+Let's launch this build live and avoid any crash!
 The demos they created, the videos they made,
 Were polished and ready, the hype never delayed.
             """
@@ -265,28 +266,42 @@ def plot_chart(df):
 def init():
     conn,jwt,cortex_app = None,None,None
 
+    # Ensure the password environment variable is loaded
+    if not RSA_PRIVATE_KEY_PASSWORD:
+        print("FATAL ERROR: RSA_PRIVATE_KEY_PASSWORD environment variable is not set.")
+        # You might want to exit or handle this error more gracefully
+        exit()
+
+    # This is the connection that is failing.
+    # We must pass the password to it directly.
     conn = snowflake.connector.connect(
         user=USER,
-        authenticator="SNOWFLAKE_JWT",
-        private_key_file=RSA_PRIVATE_KEY_PATH,
         account=ACCOUNT,
+        private_key_file=RSA_PRIVATE_KEY_PATH,
+        # THIS IS THE CRITICAL FIX: Add the passphrase directly to the connector
+        private_key_passphrase=RSA_PRIVATE_KEY_PASSWORD,  
         warehouse=WAREHOUSE,
         role=ROLE,
         host=HOST,
         database=DATABASE,
         schema=SCHEMA
+        # The 'authenticator' is inferred from using a private key, so it's not strictly needed
     )
-    if not conn.rest.token:
-        print(">>>>>>>>>> Snowflake connection unsuccessful!")
+    if conn:
+        print(">>>>>>>>>> Snowflake database connection successful!")
+    else:
+        print(">>>>>>>>>> Snowflake database connection failed!")
+        exit()
 
+    # This part was already correct and uses our fixed JWT generator
     cortex_app = cortex_chat.CortexChat(
-        AGENT_ENDPOINT, 
-        SEARCH_SERVICE,
-        SEMANTIC_MODEL,
-        MODEL, 
-        ACCOUNT,
-        USER,
-        RSA_PRIVATE_KEY_PATH)
+        agent_url=AGENT_ENDPOINT, 
+        semantic_model=SEMANTIC_MODEL,
+        model=MODEL, 
+        account=ACCOUNT,
+        user=USER,
+        private_key_path=RSA_PRIVATE_KEY_PATH,
+        private_key_password=RSA_PRIVATE_KEY_PASSWORD)
 
     print(">>>>>>>>>> Init complete")
     return conn,jwt,cortex_app

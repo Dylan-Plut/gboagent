@@ -46,12 +46,14 @@ class JWTGenerator(object):
     ALGORITHM = "RS256"  # Tokens will be generated using RSA with SHA256
 
     def __init__(self, account: Text, user: Text, private_key_file_path: Text,
+                 private_key_password: str = None, # MODIFICATION: Added password parameter
                  lifetime: timedelta = LIFETIME, renewal_delay: timedelta = RENEWAL_DELTA):
         """
         __init__ creates an object that generates JWTs for the specified user, account identifier, and private key.
         :param account: Your Snowflake account identifier. See https://docs.snowflake.com/en/user-guide/admin-account-identifier.html. Note that if you are using the account locator, exclude any region information from the account locator.
         :param user: The Snowflake username.
         :param private_key_file_path: Path to the private key file used for signing the JWTs.
+        :param private_key_password: The password to decrypt the private key.
         :param lifetime: The number of minutes (as a timedelta) during which the key will be valid.
         :param renewal_delay: The number of minutes (as a timedelta) from now after which the JWT generator should renew the JWT.
         """
@@ -79,8 +81,15 @@ class JWTGenerator(object):
                 # Try to access the private key without a passphrase.
                 self.private_key = load_pem_private_key(pemlines, None, default_backend())
             except TypeError:
-                # If that fails, provide the passphrase returned from get_private_key_passphrase().
-                self.private_key = load_pem_private_key(pemlines, get_private_key_passphrase().encode(), default_backend())
+                # MODIFICATION START: Use the provided password first, then fall back to interactive prompt.
+                password = None
+                if private_key_password:
+                    password = private_key_password.encode()
+                else:
+                    password = get_private_key_passphrase().encode()
+                
+                self.private_key = load_pem_private_key(pemlines, password, default_backend())
+                # MODIFICATION END
 
     def prepare_account_name_for_jwt(self, raw_account: Text) -> Text:
         """

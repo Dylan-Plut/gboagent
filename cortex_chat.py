@@ -12,7 +12,8 @@ class CortexChat:
             model: str, 
             account: str,
             user: str,
-            private_key_path: str
+            private_key_path: str,
+            private_key_password: str = None
         ):
         self.agent_url = agent_url
         self.model = model
@@ -20,7 +21,8 @@ class CortexChat:
         self.account = account
         self.user = user
         self.private_key_path = private_key_path
-        self.jwt = JWTGenerator(self.account, self.user, self.private_key_path).get_token()
+        self.private_key_password = private_key_password
+        self.jwt = JWTGenerator(self.account, self.user, self.private_key_path, self.private_key_password).get_token()
 
     def _retrieve_response(self, query: str, limit=1) -> dict[str, any]:
         url = self.agent_url
@@ -72,7 +74,7 @@ Never guess. If the user's intent remains unclear after your initial analysis, a
             ],
             "tool_resources": {
                 "revenue_analyst": {
-                    "semantic_model_file": self.semantic_model,
+                    "semantic_view": self.semantic_model,
                     "description": """The GBO_MODEL semantic view provides a comprehensive analysis framework for Avatar movie's business performance across multiple dimensions. It combines domestic box office metrics (weekly revenue, theater counts) with international market performance (country-wise distribution, market share) and integrates supply chain operations (product delivery, supplier management). The view enables analysis of both theatrical performance and physical product distribution, spanning from CORTEX_ANALYST_DEMO database's FAKE_GBO and REVENUE_TIMESERIES schemas. This integrated view allows tracking of the complete business cycle from theatrical release to product merchandising and distribution.
 
 This semantic view combines movie performance metrics (both domestic and international) with supply chain data, suggesting it's designed to analyze the complete business operation of Avatar movie, from box office performance to physical product distribution and sales."""
@@ -84,7 +86,7 @@ This semantic view combines movie performance metrics (both domestic and interna
         if response.status_code == 401:  # Unauthorized - likely expired JWT
             print("JWT has expired. Generating new JWT...")
             # Generate new token
-            self.jwt = JWTGenerator(self.account, self.user, self.private_key_path).get_token()
+            self.jwt = JWTGenerator(self.account, self.user, self.private_key_path, self.private_key_password).get_token()
             # Retry the request with the new token
             headers["Authorization"] = f"Bearer {self.jwt}"
             print("New JWT generated. Sending new request to Cortex Agents API. Please wait...")
