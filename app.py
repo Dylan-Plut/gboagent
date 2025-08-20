@@ -169,6 +169,7 @@ def plot_chart(df):
 
 def init():
     # This function is correct, no changes needed
+    print(f">>>>>>>>>> Connecting with ROLE: {ROLE} and USER: {USER}")
     print(">>>>>>>>>> Manually decrypting private key for database connection...")
     with open(RSA_PRIVATE_KEY_PATH, "rb") as pem_in:
         pemlines = pem_in.read()
