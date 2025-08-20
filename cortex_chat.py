@@ -32,37 +32,27 @@ class CortexChat:
             'Accept': 'application/json',
             'Authorization': f"Bearer {self.jwt}"
         }
+        
+        # Corrected data payload with proper Snowflake Cortex Agent API format
         data = {
             "model": self.model,
-            "preamble": """You are a sophisticated and helpful Data Intelligence Assistant. Your primary purpose is to provide users with accurate insights from the company's data ecosystem. You have access to two distinct, powerful tools to accomplish this:
-Cortex Analyst: Use this tool for quantitative questions against structured data. It excels at performing calculations, aggregations (like sum, count, average), trend analysis, and answering questions about specific business metrics, KPIs, tables, or columns.
-Cortex Search: Use this tool for qualitative questions and information retrieval from unstructured and semi-structured documents. It is designed to find relevant information within text-based sources like reports, presentations, articles, and knowledge bases.
-Your core responsibility is to accurately interpret the user's intent. First, understand what the user is asking for—a specific number or a general explanation. Then, select the appropriate tool to deliver the most precise and relevant answer. If a user's query is ambiguous, proactively ask clarifying questions to ensure you can provide the best possible response.
+            "response_instruction": """You are a sophisticated and helpful Data Intelligence Assistant. Your primary purpose is to provide users with accurate insights from the company's data ecosystem. 
 
-You must follow a strict decision-making process to route user queries. Analyze every query based on the following rules to select the correct tool.
-Analyze User Intent and Keywords:
-Trigger Cortex Analyst if the query involves:
-Quantitative Language: "How many," "what is the total," "calculate," "sum," "average," "count," "top 5," "what percentage," "compare," "measure."
-Structured Data References: Mentions of specific database tables, columns, records, or well-defined business metrics (e.g., "Q3 revenue," "customer churn rate," "daily active users").
-The expected answer is a number, chart, or a precise data point.
-Trigger Cortex Search if the query involves:
-Qualitative Language: "Tell me about," "what is," "find information on," "explain," "summarize," "what does the documentation say."
-Unstructured Content References: Mentions of "documents," "reports," "presentations," "emails," "articles," "manuals," or a "knowledge base."
-The expected answer is a textual explanation, a summary, or a link to a document.
-Default Action and Ambiguity Resolution:
-If a query is ambiguous or could be answered by either tool, your default action is to start with Cortex Search to gather broad context first.
-If the initial search results suggest that a precise, structured answer is available, you may then follow up with a targeted call to Cortex Analyst.
-Never guess. If the user's intent remains unclear after your initial analysis, ask a clarifying question like, "Are you looking for a specific number from our database, or for a general explanation from our documents?\"""",
+You have access to the revenue_analyst tool which uses Cortex Analyst for quantitative questions against structured data. This tool excels at performing calculations, aggregations (like sum, count, average), trend analysis, and answering questions about specific business metrics, KPIs, tables, or columns.
+
+IMPORTANT: Always use the revenue_analyst tool to answer data-related questions. Do not provide answers without using the tool first. The tool has access to Avatar GBO (Global Box Office) data and can generate SQL queries to retrieve the requested information.
+
+When a user asks for data, metrics, or analysis, immediately use the revenue_analyst tool to query the semantic model and retrieve the accurate data.""",
             "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": query
-                    }
-                ]
-            }
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": query
+                        }
+                    ]
+                }
             ],
             "tools": [
                 {
@@ -74,33 +64,62 @@ Never guess. If the user's intent remains unclear after your initial analysis, a
             ],
             "tool_resources": {
                 "revenue_analyst": {
-                    "semantic_view": self.semantic_model,
-                    "description": """The GBO_MODEL semantic view provides a comprehensive analysis framework for Avatar movie's business performance across multiple dimensions. It combines domestic box office metrics (weekly revenue, theater counts) with international market performance (country-wise distribution, market share) and integrates supply chain operations (product delivery, supplier management). The view enables analysis of both theatrical performance and physical product distribution, spanning from CORTEX_ANALYST_DEMO database's FAKE_GBO and REVENUE_TIMESERIES schemas. This integrated view allows tracking of the complete business cycle from theatrical release to product merchandising and distribution.
-
-This semantic view combines movie performance metrics (both domestic and international) with supply chain data, suggesting it's designed to analyze the complete business operation of Avatar movie, from box office performance to physical product distribution and sales."""
+                    "semantic_view": self.semantic_model
                 }
             },
+            "tool_choice": {
+                "type": "auto"
+            },
+            "experimental": {}
         }
-        response = requests.post(url, headers=headers, json=data)
+
+        if DEBUG:
+            print("Request payload:")
+            print(json.dumps(data, indent=2))
+        
+        try:
+            response = requests.post(url, headers=headers, json=data, timeout=60)
+        except requests.exceptions.Timeout:
+            print("Request timed out. The Cortex Agent might be busy or unresponsive.")
+            return {"text": "Request timed out. Please try again.", "sql": "", "citations": ""}
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {e}")
+            return {"text": f"Request failed: {e}", "sql": "", "citations": ""}
 
         if response.status_code == 401:  # Unauthorized - likely expired JWT
             print("JWT has expired. Generating new JWT...")
-            # Generate new token
-            self.jwt = JWTGenerator(self.account, self.user, self.private_key_path, self.private_key_password).get_token()
-            # Retry the request with the new token
-            headers["Authorization"] = f"Bearer {self.jwt}"
-            print("New JWT generated. Sending new request to Cortex Agents API. Please wait...")
-            response = requests.post(url, headers=headers, json=data)
+            try:
+                # Generate new token
+                self.jwt = JWTGenerator(self.account, self.user, self.private_key_path, self.private_key_password).get_token()
+                # Retry the request with the new token
+                headers["Authorization"] = f"Bearer {self.jwt}"
+                print("New JWT generated. Sending new request to Cortex Agents API. Please wait...")
+                response = requests.post(url, headers=headers, json=data, timeout=60)
+            except Exception as e:
+                print(f"Failed to regenerate JWT: {e}")
+                return {"text": f"Authentication failed: {e}", "sql": "", "citations": ""}
 
         if DEBUG:
-            print(response.text)
+            print(f"Response status code: {response.status_code}")
+            print("Response headers:")
+            for key, value in response.headers.items():
+                print(f"  {key}: {value}")
+            print("Response content:")
+            print(response.text[:1000])  # Print first 1000 chars
+
         if response.status_code == 200:
             return self._parse_response(response)
         else:
-            print(f"Error: Received status code {response.status_code} with message {response.json()}")
-            return None
+            try:
+                error_details = response.json()
+                print(f"Error: Received status code {response.status_code}")
+                print(f"Error details: {json.dumps(error_details, indent=2)}")
+                return {"text": f"Error {response.status_code}: {error_details}", "sql": "", "citations": ""}
+            except:
+                print(f"Error: Received status code {response.status_code} with message {response.text}")
+                return {"text": f"Error {response.status_code}: {response.text}", "sql": "", "citations": ""}
 
-    def _parse_delta_content(self,content: list) -> dict[str, any]:
+    def _parse_delta_content(self, content: list) -> dict[str, any]:
         """Parse different types of content from the delta."""
         result = {
             'text': '',
@@ -119,7 +138,7 @@ This semantic view combines movie performance metrics (both domestic and interna
         
         return result
 
-    def _process_sse_line(self,line: str) -> dict[str, any]:
+    def _process_sse_line(self, line: str) -> dict[str, any]:
         """Process a single SSE line and return parsed content."""
         if not line.startswith('data: '):
             return {}
@@ -129,6 +148,9 @@ This semantic view combines movie performance metrics (both domestic and interna
                 return {'type': 'done'}
                 
             data = json.loads(json_str)
+            if DEBUG:
+                print(f"SSE Data: {json.dumps(data, indent=2)}")
+                
             if data.get('object') == 'message.delta':
                 delta = data.get('delta', {})
                 if 'content' in delta:
@@ -137,10 +159,13 @@ This semantic view combines movie performance metrics (both domestic and interna
                         'content': self._parse_delta_content(delta['content'])
                     }
             return {'type': 'other', 'data': data}
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            if DEBUG:
+                print(f"JSON decode error: {e}")
+                print(f"Problematic line: {line}")
             return {'type': 'error', 'message': f'Failed to parse: {line}'}
     
-    def _parse_response(self,response: requests.Response) -> dict[str, any]:
+    def _parse_response(self, response: requests.Response) -> dict[str, any]:
         """Parse and print the SSE chat response with improved organization."""
         accumulated = {
             'text': '',
@@ -149,17 +174,23 @@ This semantic view combines movie performance metrics (both domestic and interna
             'other': []
         }
 
-        for line in response.iter_lines():
-            if line:
-                result = self._process_sse_line(line.decode('utf-8'))
-                
-                if result.get('type') == 'message':
-                    content = result['content']
-                    accumulated['text'] += content['text']
-                    accumulated['tool_use'].extend(content['tool_use'])
-                    accumulated['tool_results'].extend(content['tool_results'])
-                elif result.get('type') == 'other':
-                    accumulated['other'].append(result['data'])
+        try:
+            for line in response.iter_lines():
+                if line:
+                    result = self._process_sse_line(line.decode('utf-8'))
+                    
+                    if result.get('type') == 'message':
+                        content = result['content']
+                        accumulated['text'] += content['text']
+                        accumulated['tool_use'].extend(content['tool_use'])
+                        accumulated['tool_results'].extend(content['tool_results'])
+                    elif result.get('type') == 'other':
+                        accumulated['other'].append(result['data'])
+                    elif result.get('type') == 'error' and DEBUG:
+                        print(f"Parse error: {result['message']}")
+        except Exception as e:
+            print(f"Error parsing response: {e}")
+            return {"text": f"Error parsing response: {e}", "sql": "", "citations": ""}
 
         text = ''
         sql = ''
@@ -170,7 +201,6 @@ This semantic view combines movie performance metrics (both domestic and interna
 
         if DEBUG:
             print("\n=== Complete Response ===")
-
             print("\n--- Generated Text ---")
             print(text)
 
@@ -186,16 +216,44 @@ This semantic view combines movie performance metrics (both domestic and interna
                 print("\n--- Tool Results ---")
                 print(json.dumps(accumulated['tool_results'], indent=2))
 
+        # Enhanced tool result parsing
         if accumulated['tool_results']:
             for result in accumulated['tool_results']:
-                for k,v in result.items():
-                    if k == 'content':
-                        for content in v:
-                            if 'sql' in content['json']:
-                                sql = content['json']['sql']
+                if isinstance(result, dict):
+                    # Handle different result structures
+                    if 'content' in result:
+                        for content in result['content']:
+                            if isinstance(content, dict):
+                                if 'json' in content and isinstance(content['json'], dict):
+                                    if 'sql' in content['json']:
+                                        sql = content['json']['sql']
+                                    if 'citations' in content['json']:
+                                        citations = content['json']['citations']
+                                elif 'sql' in content:
+                                    sql = content['sql']
+                    elif 'sql' in result:
+                        sql = result['sql']
+                    elif 'output' in result and isinstance(result['output'], dict):
+                        if 'sql' in result['output']:
+                            sql = result['output']['sql']
+
+        # If we have tool usage but no results, indicate that tools were attempted
+        if accumulated['tool_use'] and not sql and not citations:
+            if DEBUG:
+                print("Tools were used but no SQL/results were extracted")
+            # Check if there's any indication of tool failure in the text
+            if "error" in text.lower() or "unable" in text.lower():
+                text += "\n\n(Note: Tool execution may have encountered issues)"
 
         return {"text": text, "sql": sql, "citations": citations}
        
     def chat(self, query: str) -> any:
-        response = self._retrieve_response(query)
-        return response
+        """Main chat interface with enhanced error handling"""
+        try:
+            response = self._retrieve_response(query)
+            if not response:
+                return {"text": "I apologize, but I couldn't process your request at this time. Please try again.", "sql": "", "citations": ""}
+            return response
+        except Exception as e:
+            print(f"Error in chat method: {e}")
+            return {"text": f"An error occurred while processing your request: {e}", "sql": "", "citations": ""}
