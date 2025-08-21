@@ -1,3 +1,4 @@
+###THIS IS THE MODIFIED, NON DEV CODE TO BE EDITED
 from typing import Any
 import os
 from slack_bolt import App
@@ -109,6 +110,7 @@ def display_agent_response(channel_id, content, say):
         say(channel=channel_id, text="I'm sorry, I couldn't generate a response.")
         return
 
+    print(content)
     # Handle SQL responses
     if content.get('sql'):
         sql = content['sql']
@@ -152,9 +154,9 @@ def plot_chart(df):
     """Generates a chart and saves it as a local file."""
     try:
         plt.figure(figsize=(10, 6), facecolor='#333333')
-        plt.pie(df[df.columns[1]], labels=df[df.columns[0]], autopct='%1.1f%%', startangle=90, colors=['#1f77b4', '#ff7f0e'], textprops={'color':"white",'fontsize': 16})
+        plt.pie(df[df.columns[1]], labels=df[df.columns[0]], autopct='%1.1f%%', startangle=90, colors=['#1f77b4', "#05ff9f", "#FFFFFF", "#7330CA"], textprops={'color':"white",'fontsize': 16})
         plt.axis('equal')
-        plt.gca().set-facecolor('#333333')
+        plt.gca().set_facecolor("#000000")  # Fixed syntax error here
         plt.tight_layout()
         file_path = f'chart_{int(time.time())}.jpg'
         plt.savefig(file_path, format='jpg')
@@ -179,7 +181,17 @@ def init():
         print(">>>>>>>>>> Snowflake database connection successful!")
     else:
         print(">>>>>>>>>> Snowflake database connection FAILED!"); exit()
-    cortex_app = cortex_chat.CortexChat(agent_url=AGENT_ENDPOINT, semantic_model=SEMANTIC_MODEL, model=MODEL, account=ACCOUNT, user=USER, private_key_path=RSA_PRIVATE_KEY_PATH, private_key_password=RSA_PRIVATE_KEY_PASSWORD)
+    
+    # Simplified initialization without search service
+    cortex_app = cortex_chat.CortexChat(
+        agent_url=AGENT_ENDPOINT, 
+        semantic_model=SEMANTIC_MODEL, 
+        model=MODEL, 
+        account=ACCOUNT, 
+        user=USER, 
+        private_key_path=RSA_PRIVATE_KEY_PATH, 
+        private_key_password=RSA_PRIVATE_KEY_PASSWORD
+    )
     print(">>>>>>>>>> Init complete")
     return conn, cortex_app
 

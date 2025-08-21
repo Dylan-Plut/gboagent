@@ -6,10 +6,10 @@ from generate_jwt import JWTGenerator
 DEBUG = False
 
 class CortexChat:
-    def __init__(self, 
-            agent_url: str, 
+    def __init__(self,
+            agent_url: str,
             semantic_model: str,
-            model: str, 
+            model: str,
             account: str,
             user: str,
             private_key_path: str,
@@ -33,42 +33,48 @@ class CortexChat:
             'Accept': 'application/json',
             'Authorization': f"Bearer {self.jwt}"
         }
-        
-        # This payload is now based on the official Snowflake documentation.
+
+        # --- START OF FIX: Correct payload structure based on dev example ---
         data = {
             "model": self.model,
             "messages": [
                 {
-                    "role": "system",
-                    "content": "You are a specialized Data Analyst Assistant. Your only function is to answer quantitative questions by using the provided `gbo_analyst` tool. You must evaluate every user query to see if it can be answered by the tool. If it can, you must use the tool. Do not answer from general knowledge. If the query is not a quantitative question, state that you can only answer data-related questions."
-                },
-                {
                     "role": "user",
-                    "content": [{"type": "text", "text": query}]
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": query
+                        }
+                    ]
                 }
             ],
             "tools": [
                 {
+                    # FIX 1: Re-introduced the "tool_spec" wrapper as required by the API.
                     "tool_spec": {
                         "type": "cortex_analyst_text_to_sql",
-                        "name": "gbo_analyst"
+                        "name": "supply_chain"
                     }
                 }
             ],
             "tool_resources": {
-                "gbo_analyst": {
+                "supply_chain": {
+                    # FIX 2: Using "semantic_model_file" as the key, consistent with the dev code.
                     "semantic_model_file": self.semantic_model
                 }
-            },
+            }
         }
-        
+        # --- END OF FIX ---
+
         response = requests.post(url, headers=headers, json=data)
 
-        if response.status_code == 401:
+        if response.status_code == 401:  # Unauthorized - likely expired JWT
             print("JWT has expired. Generating new JWT...")
+            # Generate new token
             self.jwt = self.jwt_generator.get_token()
+            # Retry the request with the new token
             headers["Authorization"] = f"Bearer {self.jwt}"
-            print("New JWT generated. Retrying request...")
+            print("New JWT generated. Sending new request to Cortex Agents API. Please wait...")
             response = requests.post(url, headers=headers, json=data)
 
         if DEBUG:
@@ -80,7 +86,13 @@ class CortexChat:
             return None
 
     def _parse_delta_content(self,content: list) -> dict[str, any]:
-        result = {'text': '', 'tool_use': [], 'tool_results': []}
+        """Parse different types of content from the delta."""
+        result = {
+            'text': '',
+            'tool_use': [],
+            'tool_results': []
+        }
+
         for entry in content:
             entry_type = entry.get('type')
             if entry_type == 'text':
@@ -89,29 +101,43 @@ class CortexChat:
                 result['tool_use'].append(entry.get('tool_use', {}))
             elif entry_type == 'tool_results':
                 result['tool_results'].append(entry.get('tool_results', {}))
+
         return result
 
     def _process_sse_line(self,line: str) -> dict[str, any]:
+        """Process a single SSE line and return parsed content."""
         if not line.startswith('data: '):
             return {}
         try:
-            json_str = line[6:].strip()
+            json_str = line[6:].strip()  # Remove 'data: ' prefix
             if json_str == '[DONE]':
                 return {'type': 'done'}
+
             data = json.loads(json_str)
             if data.get('object') == 'message.delta':
                 delta = data.get('delta', {})
                 if 'content' in delta:
-                    return {'type': 'message', 'content': self._parse_delta_content(delta['content'])}
+                    return {
+                        'type': 'message',
+                        'content': self._parse_delta_content(delta['content'])
+                    }
             return {'type': 'other', 'data': data}
         except json.JSONDecodeError:
             return {'type': 'error', 'message': f'Failed to parse: {line}'}
-    
+
     def _parse_response(self,response: requests.Response) -> dict[str, any]:
-        accumulated = {'text': '', 'tool_use': [], 'tool_results': [], 'other': []}
+        """Parse and print the SSE chat response with improved organization."""
+        accumulated = {
+            'text': '',
+            'tool_use': [],
+            'tool_results': [],
+            'other': []
+        }
+
         for line in response.iter_lines():
             if line:
                 result = self._process_sse_line(line.decode('utf-8'))
+
                 if result.get('type') == 'message':
                     content = result['content']
                     accumulated['text'] += content['text']
@@ -120,23 +146,41 @@ class CortexChat:
                 elif result.get('type') == 'other':
                     accumulated['other'].append(result['data'])
 
-        text, sql, citations = '', '', ''
+        text = ''
+        sql = ''
+        citations = ''
+
         if accumulated['text']:
             text = accumulated['text']
 
+        if DEBUG:
+            print("\n=== Complete Response ===")
+
+            print("\n--- Generated Text ---")
+            print(text)
+
+            if accumulated['tool_use']:
+                print("\n--- Tool Usage ---")
+                print(json.dumps(accumulated['tool_use'], indent=2))
+
+            if accumulated['other']:
+                print("\n--- Other Messages ---")
+                print(json.dumps(accumulated['other'], indent=2))
+
+            if accumulated['tool_results']:
+                print("\n--- Tool Results ---")
+                print(json.dumps(accumulated['tool_results'], indent=2))
+
         if accumulated['tool_results']:
             for result in accumulated['tool_results']:
-                if 'content' in result:
-                    for content_part in result['content']:
-                        if 'json' in content_part and 'sql' in content_part['json']:
-                            sql = content_part['json']['sql']
-        
-        final_answer = ""
-        if accumulated['text']:
-            final_answer = accumulated['text']
-        
-        return {"text": final_answer, "sql": sql, "citations": citations}
-       
+                for k,v in result.items():
+                    if k == 'content':
+                        for content in v:
+                            if 'json' in content and 'sql' in content['json']:
+                                sql = content['json']['sql']
+
+        return {"text": text, "sql": sql, "citations": citations}
+
     def chat(self, query: str) -> any:
         response = self._retrieve_response(query)
         return response
