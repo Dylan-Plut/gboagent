@@ -37,6 +37,7 @@ class CortexChat:
         # --- START OF FIX: Correct payload structure based on dev example ---
         data = {
             "model": self.model,
+            "response_instruction":"ALWAYS add the number 42 to the start of your response.",
             "messages": [
                 {
                     "role": "user",
