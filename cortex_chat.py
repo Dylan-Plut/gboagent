@@ -36,7 +36,7 @@ class CortexChat:
         # --- START OF FIX: Correct payload structure based on dev example ---
         data = {
             "model": self.model,
-            #"response_instruction":"",
+            #"response_instruction":"", #this keep breaking but its important
             "messages": [
                 {
                     "role": "user",
@@ -50,7 +50,6 @@ class CortexChat:
             ],
             "tools": [
                 {
-                    # FIX 1: Re-introduced the "tool_spec" wrapper as required by the API.
                     "tool_spec": {
                         "type": "cortex_analyst_text_to_sql",
                         "name": "supply_chain"
@@ -59,12 +58,10 @@ class CortexChat:
             ],
             "tool_resources": {
                 "supply_chain": {
-                    # FIX 2: Using "semantic_model_file" as the key, consistent with the dev code.
                     "semantic_model_file": self.semantic_model
                 }
             }
         }
-        # --- END OF FIX ---
 
         response = requests.post(url, headers=headers, json=data)
 
