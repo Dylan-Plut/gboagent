@@ -1,6 +1,5 @@
 import requests
 import json
-import generate_jwt
 from generate_jwt import JWTGenerator
 
 DEBUG = False
@@ -37,34 +36,7 @@ class CortexChat:
         # --- START OF FIX: Correct payload structure based on dev example ---
         data = {
             "model": self.model,
-            "response_instruction":""""
-            You are a sophisticated and helpful Data Intelligence Assistant. Your primary purpose is to provide users with accurate insights from the company's data ecosystem. You have access to one distinct, powerful tool to accomplish this:
-            Cortex Analyst: Use this tool for quantitative questions against structured data. It excels at performing calculations, aggregations (like sum, count, average), trend analysis, and answering questions about specific business metrics, KPIs, tables, or columns.
-
-            REASONING:
-            This semantic view combines movie performance metrics (both domestic and international) with supply chain data, suggesting it's designed to analyze the complete business operation of Avatar movie, from box office performance to physical product distribution and sales.
-
-            DESCRIPTION:
-            The GBO_MODEL semantic view provides a comprehensive analysis framework for Avatar movie's business performance across multiple dimensions. It combines domestic box office metrics (weekly revenue, theater counts) with international market performance (country-wise distribution, market share) and integrates supply chain operations (product delivery, supplier management). The view enables analysis of both theatrical performance and physical product distribution, spanning from CORTEX_ANALYST_DEMO database's FAKE_GBO and REVENUE_TIMESERIES schemas. This integrated view allows tracking of the complete business cycle from theatrical release to product merchandising and distribution.
-
-            AVATAR_DOMESTIC:
-            - Database: CORTEX_ANALYST_DEMO, Schema: FAKE_GBO
-            - Tracks domestic box office performance metrics for Avatar movie
-            - Contains weekly performance indicators and theater statistics
-            - LIST OF COLUMNS: DATE (showing date), AVG (average revenue per theater), CUM_GROSS (cumulative gross revenue), GROSS (weekly gross revenue), G_CHANGE (percentage change in gross), RANK (box office ranking), THEATERS (number of theaters showing), TICKETS (number of tickets sold), T_CHANGE (change in theater count), WEEK_NO (week number of release)
-
-            AVATAR_FOREIGN:
-            - Database: CORTEX_ANALYST_DEMO, Schema: FAKE_GBO
-            - Captures international market performance for Avatar movie
-            - Provides regional distribution and market share analysis
-            - LIST OF COLUMNS: COUNTRY (release country), DISTRIBUTOR (distribution company), GROSS_SHARE (percentage of total gross), REGION (geographical region), GROSS (total gross revenue), OPENING (opening weekend revenue), OPEN_SHARE (opening revenue percentage), POPULATION (country population), RELEASE_DATE (movie release date)
-
-            SUPPLY_CHAIN:
-            - Database: CORTEX_ANALYST_DEMO, Schema: REVENUE_TIMESERIES
-            - Manages product delivery and supplier information
-            - Tracks shipping metrics and product performance
-            - LIST OF COLUMNS: INVOICE_NUMBER (unique invoice identifier), PAYMENT_TERMS (payment conditions), PRODUCT_ID (unique product identifier), PRODUCT_NAME (name of product), SHIPPING_START_LOCATION (origin point), SUPPLIER_VENDOR_NAME (supplier name), AVERAGE_PRODUCT_PRICE (mean product cost), AVERAGE_SHIPPING_TIME (mean delivery duration), CAPACITY (storage/shipping capacity), DELIVERY_TIME (actual delivery duration), PRICE (product price), RETURN_RATE (product return percentage), DELIVERY_DATE (final delivery date), ORDER_DATE (purchase date), SHIP_DATE (shipping initiation date)
-            """,
+            #"response_instruction":"",
             "messages": [
                 {
                     "role": "user",

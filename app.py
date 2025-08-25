@@ -1,4 +1,3 @@
-###THIS IS THE MODIFIED, NON DEV CODE TO BE EDITED
 from typing import Any
 import os
 from slack_bolt import App
@@ -18,7 +17,7 @@ from cryptography.hazmat.backends import default_backend
 
 import cortex_chat
 
-matplotlib.use('Agg')
+matplotlib.use('Agg')  # Use the non-interactive 'Agg' backend for server-side image generation
 
 # Forcing override to ensure .env in this folder is used
 load_dotenv(override=True)
@@ -43,7 +42,6 @@ app = App(token=SLACK_BOT_TOKEN)
 
 @app.event("app_home_opened")
 def update_home_tab(client, event, logger):
-    # This function is correct, no changes needed
     try:
         client.views_publish(
             user_id=event["user"],
@@ -54,7 +52,7 @@ def update_home_tab(client, event, logger):
 
 @app.event("message")
 def handle_message_events(ack, body, say, client):
-    # This function is correct, no changes needed
+
     ack()
     if 'bot_id' in body['event']:
         return
@@ -75,9 +73,7 @@ def handle_message_events(ack, body, say, client):
         print(f"--- ERROR in handle_message_events: {error_info} ---")
         say(channel=channel_id, text=f"An error occurred: {error_info}")
 
-# --- START OF FIX 1: UPDATE THE ACTION HANDLER ---
-# The listener now uses a regular expression to catch both 'feedback_helpful'
-# and 'feedback_not_helpful' actions in a single function.
+
 @app.action(re.compile("feedback_(helpful|not_helpful)"))
 def handle_feedback(ack, body, say, logger):
     ack()
@@ -93,9 +89,6 @@ def handle_feedback(ack, body, say, logger):
     # You could add logic here to update the original message, e.g., to remove the buttons
     # For now, just send a confirmation message.
     say(text=f"Thank you for your feedback!", channel=body['channel']['id'])
-# --- END OF FIX 1 ---
-
-# In app.py
 
 def display_agent_response(channel_id, content, say):
     """
@@ -168,19 +161,18 @@ def plot_chart(df):
         return None
 
 def init():
-    # This function is correct, no changes needed
-    print(f">>>>>>>>>> Connecting with ROLE: {ROLE} and USER: {USER}")
-    print(">>>>>>>>>> Manually decrypting private key for database connection...")
+    print(f"Connecting with ROLE: {ROLE} and USER: {USER}")
+    print("Manually decrypting private key for database connection...")
     with open(RSA_PRIVATE_KEY_PATH, "rb") as pem_in:
         pemlines = pem_in.read()
     private_key_obj = load_pem_private_key(pemlines, password=RSA_PRIVATE_KEY_PASSWORD.encode(), backend=default_backend())
-    print(">>>>>>>>>> Private key decrypted successfully.")
-    print(">>>>>>>>>> Connecting to Snowflake database using private key object...")
+    print("Private key decrypted successfully.")
+    print("Connecting to Snowflake database using private key object...")
     conn = snowflake.connector.connect(user=USER, account=ACCOUNT, private_key=private_key_obj, warehouse=WAREHOUSE, role=ROLE, host=HOST, database=DATABASE, schema=SCHEMA)
     if conn:
-        print(">>>>>>>>>> Snowflake database connection successful!")
+        print("Snowflake database connection successful!")
     else:
-        print(">>>>>>>>>> Snowflake database connection FAILED!"); exit()
+        print("Snowflake database connection FAILED!"); exit()
     
     # Simplified initialization without search service
     cortex_app = cortex_chat.CortexChat(
@@ -192,7 +184,7 @@ def init():
         private_key_path=RSA_PRIVATE_KEY_PATH, 
         private_key_password=RSA_PRIVATE_KEY_PASSWORD
     )
-    print(">>>>>>>>>> Init complete")
+    print("Initialization complete")
     return conn, cortex_app
 
 if __name__ == "__main__":
