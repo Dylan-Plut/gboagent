@@ -154,7 +154,7 @@ def plot_chart(df):
     """Generates a chart and saves it as a local file."""
     try:
         plt.figure(figsize=(10, 6), facecolor='#333333')
-        plt.pie(df[df.columns[1]], labels=df[df.columns[0]], autopct='%1.1f%%', startangle=90, colors=['#1f77b4', "#05ff9f", "#FFFFFF", "#7330CA"], textprops={'color':"white",'fontsize': 16})
+        plt.pie(df[df.columns[1]], labels=df[df.columns[0]], autopct='%1.1f%%', startangle=90, colors=["#3695da", "#150955ff", "#1B24A1", "#7330CA"], textprops={'color':"white",'fontsize': 16})
         plt.axis('equal')
         plt.gca().set_facecolor("#000000")  # Fixed syntax error here
         plt.tight_layout()
