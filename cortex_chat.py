@@ -44,69 +44,108 @@ class CortexChat:
         return assistant_content_parts
 
     def chat(self, query: str, conn) -> dict:
+        print(f"--- Received query: {query} ---")
         self.history = [{"role": "user", "content": [{"type": "text", "text": query}]}]
         
         # First API call to get SQL
+        print("--- Sending first API call to get SQL ---")
         response_one = self._send_request()
         if response_one.status_code != 200:
+            print(f"--- Error on first API call: {response_one.status_code} ---")
             return {"error": f"API Error on first call: Status {response_one.status_code}"}
 
         assistant_parts_one = self._parse_sse_stream(response_one)
-        if not assistant_parts_one: return {"error": "Agent returned an empty response on first call."}
+        print(f"--- First API response parts: {json.dumps(assistant_parts_one, indent=2)} ---")
         
+        if not assistant_parts_one: 
+            print("--- Empty response from first API call ---")
+            return {"error": "Agent returned an empty response on first call."}
+        
+        # Extract text from regular text parts
+        initial_interpretation = "".join(part.get('text', '') for part in assistant_parts_one if part.get('type') == 'text')
+        print(f"--- Initial text interpretation: {initial_interpretation} ---")
+        
+        # Extract interpretation from tool results
         self.history.append({"role": "assistant", "content": assistant_parts_one})
         sql_results_part = next((part for part in assistant_parts_one if part.get('type') == 'tool_results'), None)
         
+        tool_interpretation = ""
+        if sql_results_part:
+            # Extract the interpretation from the tool results json
+            tool_results = sql_results_part.get('tool_results', {})
+            content = tool_results.get('content', [{}])
+            if content and len(content) > 0:
+                json_content = content[0].get('json', {})
+                tool_interpretation = json_content.get('text', '')
+                print(f"--- Tool interpretation: {tool_interpretation} ---")
+        
+        # Use the tool interpretation if available, otherwise fall back to initial text
+        final_interpretation = tool_interpretation if tool_interpretation else initial_interpretation
+        print(f"--- Final interpretation to use: {final_interpretation} ---")
+        
         if not sql_results_part:
-            text = "".join(part.get('text', '') for part in assistant_parts_one if part.get('type') == 'text')
-            return {"text": text, "dataframe": None, "sql": None}
+            print("--- No SQL generated, returning interpretation ---")
+            return {"text": final_interpretation or "I couldn't interpret your request", "dataframe": None, "sql": None}
 
         # Execute SQL
         tool_results = sql_results_part.get('tool_results', {})
         sql_query = tool_results.get('content', [{}])[0].get('json', {}).get('sql')
+        print(f"--- Tool results structure: {json.dumps(tool_results, indent=2)} ---")
 
         if not isinstance(sql_query, str):
+            print(f"--- Invalid SQL query: {sql_query} ---")
             return {"error": "Agent did not provide a valid SQL query.", "sql": str(sql_query)}
         
-        print(f"--- Extracted SQL: {sql_query} ---")
+        print(f"--- Executing SQL: {sql_query} ---")
         try:
             df = pd.read_sql(sql_query, conn)
+            print(f"--- SQL execution successful. Rows: {len(df)}, Columns: {list(df.columns)} ---")
         except Exception as e:
+            print(f"--- SQL execution error: {e} ---")
             return {"error": str(e), "sql": sql_query}
 
         # Send data back for summary
+        print("--- Sending second API call for summary ---")
         tool_data = {"type": "text", "text": df.to_json(orient='records')}
         self.history.append({"role": "user", "content": [{"type": "tool_results", "tool_results": {"tool_name": tool_results.get('tool_name'), "content": [tool_data]}}]})
 
         # Second API call to get summary
         response_two = self._send_request()
         if response_two.status_code != 200:
-            return {"error": f"API Error on second call: Status {response_two.status_code}", "sql": sql_query, "dataframe": df}
-
-        assistant_parts_two = self._parse_sse_stream(response_two)
-        
-        # --- THE DEFINITIVE FIX TO THE LOGIC IS HERE ---
-        # If the second response is empty, it's not a total failure. It's a partial success.
-        if not assistant_parts_two:
-            print("--- Agent returned an empty summary. Returning data with a warning. ---")
+            print(f"--- Error on second API call: {response_two.status_code} ---")
+            # Return tool interpretation when second call fails
             return {
-                "text": "I successfully retrieved the data for you, but I encountered an issue while generating a summary. Here is the raw data:",
+                "text": final_interpretation,
                 "dataframe": df,
                 "sql": sql_query,
-                "warning": "Summarization failed." # Add a warning flag
+                "warning": f"API Error on second call: Status {response_two.status_code}"
             }
-        # --- END OF FIX ---
+
+        assistant_parts_two = self._parse_sse_stream(response_two)
+        print(f"--- Second API response parts: {json.dumps(assistant_parts_two, indent=2)} ---")
+        
+        # If the second response is empty, use the tool interpretation
+        if not assistant_parts_two:
+            print("--- Empty response from second API call, using tool interpretation ---")
+            return {
+                "text": final_interpretation,
+                "dataframe": df,
+                "sql": sql_query,
+                "warning": "Summarization failed"
+            }
 
         self.history.append({"role": "assistant", "content": assistant_parts_two})
         final_text = "".join(part.get('text', '') for part in assistant_parts_two if part.get('type') == 'text')
+        print(f"--- Final summary text: {final_text} ---")
         
-        # If the agent returns text but it's empty, handle it as a partial success too.
+        # If the agent returns text but it's empty, use tool interpretation
         if not final_text.strip():
-             return {
-                "text": "I successfully retrieved the data for you, but the agent did not provide a summary. Here is the raw data:",
+            print("--- Empty summary text, using tool interpretation ---")
+            return {
+                "text": final_interpretation,
                 "dataframe": df,
                 "sql": sql_query,
-                "warning": "Empty summary."
+                "warning": "Empty summary"
             }
 
         return {"text": final_text, "dataframe": df, "sql": sql_query}
