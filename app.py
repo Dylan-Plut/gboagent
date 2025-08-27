@@ -190,13 +190,92 @@ def plot_chart(df: pd.DataFrame) -> str | None:
         plt.figure(figsize=(10, 6))
         # Use a slice to handle potentially large data for charting
         plot_df = df.head(15)
-        plt.pie(plot_df.iloc[:, 1], labels=plot_df.iloc[:, 0], autopct='%1.1f%%', startangle=90)
-        plt.axis('equal'); plt.tight_layout()
+        
+        # Check column types and determine appropriate chart
+        numeric_cols = plot_df.select_dtypes(include=['number']).columns.tolist()
+        
+        # If we don't have at least one numeric column, we can't chart
+        if not numeric_cols:
+            print("--- No numeric columns available for charting ---")
+            return None
+        
+        # Detect date columns or string columns that might contain dates
+        potential_date_cols = []
+        for col in plot_df.columns:
+            if col not in numeric_cols:
+                # Check if column contains date-like strings
+                if any(re.search(r'\d+[/-]\d+|\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b', str(x)) 
+                       for x in plot_df[col].dropna().head(3)):
+                    potential_date_cols.append(col)
+        
+        # Determine chart type based on data structure
+        if len(df.columns) >= 2:
+            if potential_date_cols and numeric_cols:
+                # Time series or categorical data - use bar chart
+                print(f"--- Creating bar chart with x={potential_date_cols[0]}, y={numeric_cols[0]} ---")
+                x_col = potential_date_cols[0]
+                y_col = numeric_cols[0]
+                
+                # Ensure x-axis labels will fit
+                if len(plot_df) > 8:
+                    plt.figure(figsize=(12, 6))
+                    plt.xticks(rotation=45, ha='right')
+                
+                # Create the bar chart
+                plt.bar(plot_df[x_col].astype(str), plot_df[y_col])
+                plt.xlabel(x_col)
+                plt.ylabel(y_col)
+                plt.title(f"{y_col} by {x_col}")
+                plt.tight_layout()
+                
+            elif len(numeric_cols) >= 2:
+                # Multiple numeric columns - scatter plot
+                print(f"--- Creating scatter plot with x={numeric_cols[0]}, y={numeric_cols[1]} ---")
+                plt.scatter(plot_df[numeric_cols[0]], plot_df[numeric_cols[1]])
+                plt.xlabel(numeric_cols[0])
+                plt.ylabel(numeric_cols[1])
+                plt.title(f"{numeric_cols[1]} vs {numeric_cols[0]}")
+                
+            else:
+                # Single numeric column with categories - pie chart
+                print(f"--- Creating pie chart ---")
+                # Filter out non-numeric values in the numeric column
+                valid_data = plot_df[~plot_df[numeric_cols[0]].isna()]
+                if len(valid_data) < 2:
+                    print("--- Not enough valid data points for a pie chart ---")
+                    return None
+                    
+                # Use the first non-numeric column as labels if available
+                label_col = next((col for col in plot_df.columns if col not in numeric_cols), None)
+                
+                if label_col:
+                    labels = valid_data[label_col].astype(str)
+                else:
+                    labels = [f"Category {i+1}" for i in range(len(valid_data))]
+                    
+                plt.pie(valid_data[numeric_cols[0]], labels=labels, autopct='%1.1f%%', startangle=90)
+                plt.axis('equal')
+                
+        else:
+            # Single column - create a simple bar chart
+            print("--- Creating simple bar chart with single column ---")
+            if numeric_cols:
+                plt.bar(range(len(plot_df)), plot_df[numeric_cols[0]])
+                plt.title(numeric_cols[0])
+            else:
+                print("--- Cannot create chart without numeric data ---")
+                return None
+        
+        # Save and return file path
         file_path = f'chart_{int(time.time())}.png'
-        plt.savefig(file_path, format='png'); plt.close()
+        plt.tight_layout()
+        plt.savefig(file_path, format='png')
+        plt.close()
         return file_path
+        
     except Exception as e:
         print(f"--- ERROR creating chart: {e} ---")
+        traceback.print_exc()  # Print full stack trace for better debugging
         return None
 
 def init():
