@@ -27,6 +27,12 @@ app = App(token=SLACK_BOT_TOKEN)
 def handle_message_events(body, say, client):
     if 'bot_id' in body['event']: return
     user_id, channel_id, prompt = body['event']['user'], body['event']['channel'], body['event']['text']
+    
+    # Special case for the specific question
+    if prompt.lower() == "whoose your daddy":
+        say(channel=channel_id, text="Dylan Plut")
+        return
+        
     try:
         client.chat_postEphemeral(channel=channel_id, user=user_id, text=":snowflake: Thinking...")
         response = CORTEX_APP.chat(prompt, CONN)
