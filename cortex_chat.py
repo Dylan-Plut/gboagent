@@ -43,23 +43,57 @@ class CortexChat:
                 print(f"Warning: Failed to parse SSE line: {decoded_line}")
         return assistant_content_parts
 
-    def chat(self, query: str, conn) -> dict:
+    def chat(self, query: str, conn, callback=None) -> dict:
         print(f"--- Received query: {query} ---")
         self.history = [{"role": "user", "content": [{"type": "text", "text": query}]}]
         
-        # First API call to get SQL
+        # First API call to get SQL and interpretation
         print("--- Sending first API call to get SQL ---")
+        
+        # Initial callback to show we're processing
+        if callback:
+            callback("I'm analyzing your question...")
+        
         response_one = self._send_request()
         if response_one.status_code != 200:
-            print(f"--- Error on first API call: {response_one.status_code} ---")
-            return {"error": f"API Error on first call: Status {response_one.status_code}"}
+            error_msg = f"API Error on first call: Status {response_one.status_code}"
+            print(f"--- {error_msg} ---")
+            if callback:
+                callback(error=error_msg)
+            return {"error": error_msg}
 
-        assistant_parts_one = self._parse_sse_stream(response_one)
+        # Stream the first response to the user as we receive it
+        assistant_parts_one = []
+        current_text = ""
+        
+        for line in response_one.iter_lines():
+            if not line: continue
+            decoded_line = line.decode('utf-8')
+            if not decoded_line.startswith('data: '): continue
+            try:
+                json_str = decoded_line[6:].strip()
+                if json_str == '[DONE]': break
+                data = json.loads(json_str)
+                if isinstance(data, dict) and data.get('object') == 'message.delta':
+                    delta_content = data.get('delta', {}).get('content', [])
+                    if isinstance(delta_content, list):
+                        for part in delta_content:
+                            assistant_parts_one.append(part)
+                            # If text content, update the callback
+                            if part.get('type') == 'text' and callback:
+                                current_text += part.get('text', '')
+                                callback(current_text)
+            except json.JSONDecodeError:
+                print(f"Warning: Failed to parse SSE line: {decoded_line}")
+    
         print(f"--- First API response parts: {json.dumps(assistant_parts_one, indent=2)} ---")
         
         if not assistant_parts_one: 
-            print("--- Empty response from first API call ---")
-            return {"error": "Agent returned an empty response on first call."}
+            error_msg = "Agent returned an empty response on first call."
+            print(f"--- {error_msg} ---")
+            if callback:
+                callback(error=error_msg)
+            return {"error": error_msg}
         
         # Extract text from regular text parts
         initial_interpretation = "".join(part.get('text', '') for part in assistant_parts_one if part.get('type') == 'text')
@@ -85,6 +119,8 @@ class CortexChat:
         
         if not sql_results_part:
             print("--- No SQL generated, returning interpretation ---")
+            if callback:
+                callback(final_interpretation, is_final=True)
             return {"text": final_interpretation or "I couldn't interpret your request", "dataframe": None, "sql": None}
 
         # Execute SQL
@@ -93,18 +129,31 @@ class CortexChat:
         print(f"--- Tool results structure: {json.dumps(tool_results, indent=2)} ---")
 
         if not isinstance(sql_query, str):
-            print(f"--- Invalid SQL query: {sql_query} ---")
-            return {"error": "Agent did not provide a valid SQL query.", "sql": str(sql_query)}
+            error_msg = "Agent did not provide a valid SQL query."
+            print(f"--- {error_msg}: {sql_query} ---")
+            if callback:
+                callback(error=error_msg, sql=str(sql_query))
+            return {"error": error_msg, "sql": str(sql_query)}
         
+        # Update the user that we're executing SQL
+        if callback:
+            callback(f"{final_interpretation}\n\n_Executing SQL query..._")
+    
         print(f"--- Executing SQL: {sql_query} ---")
         try:
             df = pd.read_sql(sql_query, conn)
             print(f"--- SQL execution successful. Rows: {len(df)}, Columns: {list(df.columns)} ---")
         except Exception as e:
-            print(f"--- SQL execution error: {e} ---")
-            return {"error": str(e), "sql": sql_query}
+            error_msg = str(e)
+            print(f"--- SQL execution error: {error_msg} ---")
+            if callback:
+                callback(error=error_msg, sql=sql_query)
+            return {"error": error_msg, "sql": sql_query}
 
         # Send data back for summary
+        if callback:
+            callback(f"{final_interpretation}\n\n_Processing results..._")
+        
         print("--- Sending second API call for summary ---")
         tool_data = {"type": "text", "text": df.to_json(orient='records')}
         self.history.append({"role": "user", "content": [{"type": "tool_results", "tool_results": {"tool_name": tool_results.get('tool_name'), "content": [tool_data]}}]})
@@ -114,6 +163,8 @@ class CortexChat:
         if response_two.status_code != 200:
             print(f"--- Error on second API call: {response_two.status_code} ---")
             # Return tool interpretation when second call fails
+            if callback:
+                callback(final_interpretation, is_final=True, df=df, sql=sql_query)
             return {
                 "text": final_interpretation,
                 "dataframe": df,
@@ -121,12 +172,37 @@ class CortexChat:
                 "warning": f"API Error on second call: Status {response_two.status_code}"
             }
 
-        assistant_parts_two = self._parse_sse_stream(response_two)
+        # Stream the second response 
+        assistant_parts_two = []
+        current_text = final_interpretation
+        
+        for line in response_two.iter_lines():
+            if not line: continue
+            decoded_line = line.decode('utf-8')
+            if not decoded_line.startswith('data: '): continue
+            try:
+                json_str = decoded_line[6:].strip()
+                if json_str == '[DONE]': break
+                data = json.loads(json_str)
+                if isinstance(data, dict) and data.get('object') == 'message.delta':
+                    delta_content = data.get('delta', {}).get('content', [])
+                    if isinstance(delta_content, list):
+                        for part in delta_content:
+                            assistant_parts_two.append(part)
+                            # If text content, update the callback
+                            if part.get('type') == 'text' and callback:
+                                current_text = final_interpretation + "\n\n" + part.get('text', '')
+                                callback(current_text)
+            except json.JSONDecodeError:
+                print(f"Warning: Failed to parse SSE line: {decoded_line}")
+    
         print(f"--- Second API response parts: {json.dumps(assistant_parts_two, indent=2)} ---")
         
         # If the second response is empty, use the tool interpretation
         if not assistant_parts_two:
             print("--- Empty response from second API call, using tool interpretation ---")
+            if callback:
+                callback(final_interpretation, is_final=True, df=df, sql=sql_query)
             return {
                 "text": final_interpretation,
                 "dataframe": df,
@@ -141,6 +217,8 @@ class CortexChat:
         # If the agent returns text but it's empty, use tool interpretation
         if not final_text.strip():
             print("--- Empty summary text, using tool interpretation ---")
+            if callback:
+                callback(final_interpretation, is_final=True, df=df, sql=sql_query)
             return {
                 "text": final_interpretation,
                 "dataframe": df,
@@ -148,4 +226,10 @@ class CortexChat:
                 "warning": "Empty summary"
             }
 
+        # Final callback with complete results
+        if callback:
+            complete_text = final_text if final_text.strip() else final_interpretation
+            callback(complete_text, is_final=True, df=df, sql=sql_query)
+
         return {"text": final_text, "dataframe": df, "sql": sql_query}
+
