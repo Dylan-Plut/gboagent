@@ -1,3 +1,4 @@
+# Standard library imports
 import os
 import re
 import time
@@ -11,30 +12,42 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from cryptography.hazmat.backends import default_backend
+# Import custom module for Cortex Chat functionality
 import cortex_chat
 
+# Set matplotlib backend to non-GUI mode for server environments
 matplotlib.use('Agg')
+# Load environment variables
 load_dotenv(override=True)
 
 # --- CONFIGURATION ---
+# Extract configuration from environment variables
 ACCOUNT, HOST, USER, DATABASE, SCHEMA, ROLE, WAREHOUSE = (os.getenv(k) for k in ["ACCOUNT", "HOST", "USER", "DATABASE", "SCHEMA", "ROLE", "WAREHOUSE"])
 SLACK_APP_TOKEN, SLACK_BOT_TOKEN = os.getenv("SLACK_APP_TOKEN"), os.getenv("SLACK_BOT_TOKEN")
 AGENT_ENDPOINT, SEMANTIC_MODEL, RSA_PRIVATE_KEY_PATH, RSA_PRIVATE_KEY_PASSWORD, MODEL = (os.getenv(k) for k in ["AGENT_ENDPOINT", "SEMANTIC_MODEL", "RSA_PRIVATE_KEY_PATH", "RSA_PRIVATE_KEY_PASSWORD", "MODEL"])
 
+# Initialize the Slack app
 app = App(token=SLACK_BOT_TOKEN)
 
 @app.event("message")
 def handle_message_events(body, say, client):
+    """
+    Processes incoming Slack messages and generates responses using Cortex agent.
+    Handles special cases, formats responses, and displays data visualizations.
+    """
+    # Ignore messages from bots to prevent infinite loops
     if 'bot_id' in body['event']: return
+    
+    # Extract key information from the message event
     user_id, channel_id, prompt = body['event']['user'], body['event']['channel'], body['event']['text']
     
-    # Special case for the specific question
+    # Special case handling for a specific question
     if prompt.lower() == "whoose your daddy":
         say(channel=channel_id, text="Dylan Plut")
         return
         
     try:
-        # Post initial message and get its timestamp
+        # Post initial "thinking" message and get its timestamp for future updates
         initial_response = client.chat_postMessage(
             channel=channel_id, 
             text=":snowflake: Thinking...",
@@ -45,11 +58,16 @@ def handle_message_events(body, say, client):
         )
         message_ts = initial_response['ts']
         
-        # Define update callback function
+        # Define callback function to update the message as processing happens
         def update_message_callback(text=None, is_final=False, df=None, sql=None, error=None):
+            """
+            Updates the Slack message with progress, results, or errors.
+            Handles file uploads for large datasets and charts.
+            """
             blocks = []
             
             if error:
+                # Error handling - show error details and SQL if available
                 blocks = [
                     {"type": "section", "text": {"type": "mrkdwn", "text": f":x: *I encountered an error.*"}},
                 ]
@@ -57,18 +75,21 @@ def handle_message_events(body, say, client):
                     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Attempted SQL:*\n```{sql}```"}})
                 blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Error Details:*\n`{error}`"}})
             else:
+                # Normal response flow
                 if text:
                     message_text = "*Answer:*\n" + text
                     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": message_text}})
                 
                 if is_final:
+                    # For final updates, include data if available
                     if df is not None and not df.empty:
                         # Handle dataframe rendering
                         df_string = df.to_string()
                         if len(df_string) < 2800:
+                            # Display data directly if it's small enough
                             blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Data:*\n```{df_string}```"}})
                         else:
-                            # Message that data is being prepared as a file
+                            # For large datasets, prepare as a file
                             blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Data is being prepared as a file (too large to display directly)*"}})
                     
                     # Add attribution and feedback buttons on final message
@@ -116,6 +137,7 @@ def handle_message_events(body, say, client):
         CORTEX_APP.chat(prompt, CONN, update_message_callback)
         
     except Exception as e:
+        # Detailed error handling with traceback information
         tb = traceback.extract_tb(e.__traceback__)
         last_call = tb[-1]
         error_info = f"{type(e).__name__} in {os.path.basename(last_call.filename)} at line {last_call.lineno}: {e}"
@@ -130,62 +152,12 @@ def handle_message_events(body, say, client):
         except:
             say(channel=channel_id, text="A critical error occurred. Please check the logs.")
 
-def display_agent_response(channel_id, content, say):
-    """Formats and sends the agent's response, handling success, partial success, and error cases."""
-    if not content:
-        say(channel=channel_id, text="I'm sorry, I couldn't generate a response.")
-        return
-
-    blocks = []
-    fallback_text = "Here is your response."
-
-    if content.get('error'):
-        fallback_text = "An error occurred."
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f":x: *I encountered an error.*"}})
-        if content.get('sql'):
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Attempted SQL:*\n```{content['sql']}```"}})
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Error Details:*\n`{content['error']}`"}})
-    else:
-        if content.get('text'):
-            fallback_text = content['text']
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Answer:*\n{content['text']}"}})
-        
-        df = content.get('dataframe')
-        if df is not None and not df.empty:
-            # --- START: DEFINITIVE FIX FOR SLACK CHARACTER LIMIT ---
-            df_string = df.to_string()
-            # Slack's limit is 3001 characters. We check against a safe margin.
-            if len(df_string) < 2800:
-                blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Data:*\n```{df_string}```"}})
-            else:
-                # If the data is too long, upload it as a file instead.
-                file_path = f'data_{int(time.time())}.csv'
-                df.to_csv(file_path, index=False)
-                app.client.files_upload_v2(
-                    channel=channel_id,
-                    file=file_path,
-                    title="Requested Data",
-                    initial_comment="The requested data was too large to display in a message, so I've attached it as a CSV file."
-                )
-                os.remove(file_path)
-            # --- END: DEFINITIVE FIX ---
-
-            if len(df.columns) > 1:
-                chart_file = plot_chart(df)
-                if chart_file:
-                    app.client.files_upload_v2(channel=channel_id, file=chart_file, title="Data Chart", initial_comment="Here is a visual representation:")
-                    os.remove(chart_file)
-        
-        blocks.extend([
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": "This content was generated by an AI assistant. Please review carefully."}]},
-            {"type": "actions", "elements": [{"type": "button", "text": {"type": "plain_text", "text": "👍"}, "action_id": "feedback_helpful"}, {"type": "button", "text": {"type": "plain_text", "text": "👎"}, "action_id": "feedback_not_helpful"}]}
-        ])
-    
-    # Only send the blocks if there are any to send (prevents errors with file-only responses)
-    if blocks:
-        say(channel=channel_id, text=fallback_text, blocks=blocks)
-
 def plot_chart(df: pd.DataFrame) -> str | None:
+    """
+    Creates a visualization from a dataframe based on its structure.
+    Chooses appropriate chart type (bar chart, scatter plot, pie chart) based on data.
+    Returns the path to the generated chart file or None if chart creation failed.
+    """
     try:
         plt.figure(figsize=(10, 6))
         # Use a slice to handle potentially large data for charting
@@ -279,6 +251,12 @@ def plot_chart(df: pd.DataFrame) -> str | None:
         return None
 
 def init():
+    """
+    Initializes the application by:
+    1. Setting up a Snowflake connection with private key authentication
+    2. Creating a CortexChat client with appropriate configuration
+    Returns the connection and chat client objects
+    """
     print("Initializing application...")
     with open(RSA_PRIVATE_KEY_PATH, "rb") as pem_in:
         private_key_obj = load_pem_private_key(pem_in.read(), password=RSA_PRIVATE_KEY_PASSWORD.encode(), backend=default_backend())
@@ -292,12 +270,14 @@ def init():
 
 @app.event("app_home_opened")
 def update_home_tab(client, event, logger):
+    """Updates the Slack App Home tab with welcome message and examples when opened"""
     try:
         client.views_publish(user_id=event["user"], view={"type": "home", "blocks": [{"type": "header", "text": {"type": "plain_text", "text": "Welcome! ❄️"}}, {"type": "section", "text": {"type": "mrkdwn", "text": "You can ask me questions about our data directly in our 1-on-1 chat."}}, {"type": "section", "text": {"type": "mrkdwn", "text": "*Examples:*\n• `What are the top 10 movie theatres this week?`\n• `Show me a breakdown of customer support tickets by service type.`"}}]} )
     except Exception as e: logger.error(f"Error publishing App Home: {e}")
 
 @app.action(re.compile("feedback_(helpful|not_helpful)"))
 def handle_feedback(ack, body, say):
+    """Handles user feedback buttons (thumbs up/down)"""
     ack()
     say(text="Thank you for your feedback!", channel=body['channel']['id'])
 
@@ -306,193 +286,3 @@ if __name__ == "__main__":
     handler = SocketModeHandler(app, SLACK_APP_TOKEN)
     print("Bolt app is running!")
     handler.start()
-
-def chat(self, query: str, conn, callback=None) -> dict:
-    print(f"--- Received query: {query} ---")
-    self.history = [{"role": "user", "content": [{"type": "text", "text": query}]}]
-    
-    # First API call to get SQL and interpretation
-    print("--- Sending first API call to get SQL ---")
-    
-    # Initial callback to show we're processing
-    if callback:
-        callback("I'm analyzing your question...")
-    
-    response_one = self._send_request()
-    if response_one.status_code != 200:
-        error_msg = f"API Error on first call: Status {response_one.status_code}"
-        print(f"--- {error_msg} ---")
-        if callback:
-            callback(error=error_msg)
-        return {"error": error_msg}
-
-    # Stream the first response to the user as we receive it
-    assistant_parts_one = []
-    current_text = ""
-    
-    for line in response_one.iter_lines():
-        if not line: continue
-        decoded_line = line.decode('utf-8')
-        if not decoded_line.startswith('data: '): continue
-        try:
-            json_str = decoded_line[6:].strip()
-            if json_str == '[DONE]': break
-            data = json.loads(json_str)
-            if isinstance(data, dict) and data.get('object') == 'message.delta':
-                delta_content = data.get('delta', {}).get('content', [])
-                if isinstance(delta_content, list):
-                    for part in delta_content:
-                        assistant_parts_one.append(part)
-                        # If text content, update the callback
-                        if part.get('type') == 'text' and callback:
-                            current_text += part.get('text', '')
-                            callback(current_text)
-        except json.JSONDecodeError:
-            print(f"Warning: Failed to parse SSE line: {decoded_line}")
-    
-    print(f"--- First API response parts: {json.dumps(assistant_parts_one, indent=2)} ---")
-    
-    if not assistant_parts_one: 
-        error_msg = "Agent returned an empty response on first call."
-        print(f"--- {error_msg} ---")
-        if callback:
-            callback(error=error_msg)
-        return {"error": error_msg}
-    
-    # Extract text from regular text parts
-    initial_interpretation = "".join(part.get('text', '') for part in assistant_parts_one if part.get('type') == 'text')
-    print(f"--- Initial text interpretation: {initial_interpretation} ---")
-    
-    # Extract interpretation from tool results
-    self.history.append({"role": "assistant", "content": assistant_parts_one})
-    sql_results_part = next((part for part in assistant_parts_one if part.get('type') == 'tool_results'), None)
-    
-    tool_interpretation = ""
-    if sql_results_part:
-        # Extract the interpretation from the tool results json
-        tool_results = sql_results_part.get('tool_results', {})
-        content = tool_results.get('content', [{}])
-        if content and len(content) > 0:
-            json_content = content[0].get('json', {})
-            tool_interpretation = json_content.get('text', '')
-            print(f"--- Tool interpretation: {tool_interpretation} ---")
-    
-    # Use the tool interpretation if available, otherwise fall back to initial text
-    final_interpretation = tool_interpretation if tool_interpretation else initial_interpretation
-    print(f"--- Final interpretation to use: {final_interpretation} ---")
-    
-    if not sql_results_part:
-        print("--- No SQL generated, returning interpretation ---")
-        if callback:
-            callback(final_interpretation, is_final=True)
-        return {"text": final_interpretation or "I couldn't interpret your request", "dataframe": None, "sql": None}
-
-    # Execute SQL
-    tool_results = sql_results_part.get('tool_results', {})
-    sql_query = tool_results.get('content', [{}])[0].get('json', {}).get('sql')
-    print(f"--- Tool results structure: {json.dumps(tool_results, indent=2)} ---")
-
-    if not isinstance(sql_query, str):
-        error_msg = "Agent did not provide a valid SQL query."
-        print(f"--- {error_msg}: {sql_query} ---")
-        if callback:
-            callback(error=error_msg, sql=str(sql_query))
-        return {"error": error_msg, "sql": str(sql_query)}
-    
-    # Update the user that we're executing SQL
-    if callback:
-        callback(f"{final_interpretation}\n\n_Executing SQL query..._")
-    
-    print(f"--- Executing SQL: {sql_query} ---")
-    try:
-        df = pd.read_sql(sql_query, conn)
-        print(f"--- SQL execution successful. Rows: {len(df)}, Columns: {list(df.columns)} ---")
-    except Exception as e:
-        error_msg = str(e)
-        print(f"--- SQL execution error: {error_msg} ---")
-        if callback:
-            callback(error=error_msg, sql=sql_query)
-        return {"error": error_msg, "sql": sql_query}
-
-    # Send data back for summary
-    if callback:
-        callback(f"{final_interpretation}\n\n_Processing results..._")
-    
-    print("--- Sending second API call for summary ---")
-    tool_data = {"type": "text", "text": df.to_json(orient='records')}
-    self.history.append({"role": "user", "content": [{"type": "tool_results", "tool_results": {"tool_name": tool_results.get('tool_name'), "content": [tool_data]}}]})
-
-    # Second API call to get summary
-    response_two = self._send_request()
-    if response_two.status_code != 200:
-        print(f"--- Error on second API call: {response_two.status_code} ---")
-        # Return tool interpretation when second call fails
-        if callback:
-            callback(final_interpretation, is_final=True, df=df, sql=sql_query)
-        return {
-            "text": final_interpretation,
-            "dataframe": df,
-            "sql": sql_query,
-            "warning": f"API Error on second call: Status {response_two.status_code}"
-        }
-
-    # Stream the second response 
-    assistant_parts_two = []
-    current_text = final_interpretation
-    
-    for line in response_two.iter_lines():
-        if not line: continue
-        decoded_line = line.decode('utf-8')
-        if not decoded_line.startswith('data: '): continue
-        try:
-            json_str = decoded_line[6:].strip()
-            if json_str == '[DONE]': break
-            data = json.loads(json_str)
-            if isinstance(data, dict) and data.get('object') == 'message.delta':
-                delta_content = data.get('delta', {}).get('content', [])
-                if isinstance(delta_content, list):
-                    for part in delta_content:
-                        assistant_parts_two.append(part)
-                        # If text content, update the callback
-                        if part.get('type') == 'text' and callback:
-                            current_text = final_interpretation + "\n\n" + part.get('text', '')
-                            callback(current_text)
-        except json.JSONDecodeError:
-            print(f"Warning: Failed to parse SSE line: {decoded_line}")
-    
-    print(f"--- Second API response parts: {json.dumps(assistant_parts_two, indent=2)} ---")
-    
-    # If the second response is empty, use the tool interpretation
-    if not assistant_parts_two:
-        print("--- Empty response from second API call, using tool interpretation ---")
-        if callback:
-            callback(final_interpretation, is_final=True, df=df, sql=sql_query)
-        return {
-            "text": final_interpretation,
-            "dataframe": df,
-            "sql": sql_query,
-            "warning": "Summarization failed"
-        }
-
-    self.history.append({"role": "assistant", "content": assistant_parts_two})
-    final_text = "".join(part.get('text', '') for part in assistant_parts_two if part.get('type') == 'text')
-    print(f"--- Final summary text: {final_text} ---")
-    
-    # If the agent returns text but it's empty, use tool interpretation
-    if not final_text.strip():
-        print("--- Empty summary text, using tool interpretation ---")
-        if callback:
-            callback(final_interpretation, is_final=True, df=df, sql=sql_query)
-        return {
-            "text": final_interpretation,
-            "dataframe": df,
-            "sql": sql_query,
-            "warning": "Empty summary"
-        }
-
-    # Final callback with complete results
-    if callback:
-        complete_text = final_text if final_text.strip() else final_interpretation
-        callback(complete_text, is_final=True, df=df, sql=sql_query)
-
-    return {"text": final_text, "dataframe": df, "sql": sql_query}
